@@ -1,16 +1,18 @@
 # 📁 File-Sorter-App
 
-File-Sorter-App — это современная утилита с графическим интерфейсом на языке Python, предназначенная для автоматизации процесса сортировки файлов. Программа сканирует выбранную вами папку и автоматически распределяет файлы по соответствующим категориям (Изображения, Документы, Музыка, Видео и т.д.) на основе их расширений.
+File-Sorter-App is a modern GUI utility built with Python, designed to automate the process of file organization. The application scans your selected folder and automatically distributes files into appropriate categories (Images, Documents, Music, Videos, etc.) based on their extensions.
 
-## 🚀 Возможности
-* **Автоматическая сортировка:** Быстрое распределение файлов по папкам одним нажатием кнопки.
-* **Безопасная обработка:** Если файл с таким именем уже существует в целевой папке, программа автоматически добавит индекс, чтобы избежать потери данных.
-* **Современный интерфейс:** Темная тема оформления, созданная на базе библиотеки CustomTkinter.
-* **Логирование:** Встроенное окно логов позволяет в реальном времени отслеживать все перемещения файлов.
+## 🚀 Features
 
-## 🛠 Установка и запуск
+- **Automatic Sorting:** Quickly organize files into categorized folders with a single click.
+- **Safe Processing:** If a file with the same name already exists in the destination folder, the app automatically appends an index to prevent any data loss.
+- **Modern Interface:** A sleek dark-themed UI built on top of the CustomTkinter library.
+- **Real-time Logging:** An integrated log window allows you to track all file movements in real time.
 
-Для работы приложения вам необходимо склонировать репозиторий и установить необходимые библиотеки:
+## 🛠️ Installation & Setup
+
+To run the application, clone the repository and install the required dependencies:
+
 ```bash
 git clone [https://github.com/azizs10/file-sorter-app.git](https://github.com/azizs10/file-sorter-app.git)
 cd file-sorter-app
