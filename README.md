@@ -11,7 +11,6 @@ File-Sorter-App — это современная утилита с графич
 ## 🛠 Установка и запуск
 
 Для работы приложения вам необходимо склонировать репозиторий и установить необходимые библиотеки:
-
 ```bash
 git clone [https://github.com/azizs10/file-sorter-app.git](https://github.com/azizs10/file-sorter-app.git)
 cd file-sorter-app
