@@ -1,341 +1,251 @@
+"""
+File Sorter Pro - главный модуль приложения
+"""
 import customtkinter as ctk
-import os
-import shutil
 import threading
 from pathlib import Path
-from tkinter import filedialog
-import time
+from tkinter import filedialog, messagebox
 
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
-
-ctk.set_widget_scaling(1.4)
-ctk.set_window_scaling(1.4)
-
-CATEGORIES = {
-    "🖼️  Images": {
-        "extensions": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".raw"],
-        "color": "#FF6B9D",
-        "folder": "🖼️ Images"
-    },
-    "📄  Documents": {
-        "extensions": [".pdf", ".docx", ".doc", ".txt", ".xlsx", ".xls", ".pptx", ".ppt", ".odt", ".rtf", ".csv"],
-        "color": "#4FC3F7",
-        "folder": "📄 Documents"
-    },
-    "🎵  Music": {
-        "extensions": [".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma"],
-        "color": "#A78BFA",
-        "folder": "🎵 Music"
-    },
-    "🎬  Video": {
-        "extensions": [".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".m4v"],
-        "color": "#34D399",
-        "folder": "🎬 Video"
-    },
-    "💻  Code": {
-        "extensions": [".py", ".js", ".html", ".css", ".java", ".cpp", ".c", ".ts", ".json", ".xml", ".php", ".rb"],
-        "color": "#FBBF24",
-        "folder": "💻 Code"
-    },
-    "📦  Archives": {
-        "extensions": [".zip", ".rar", ".7z", ".tar", ".gz", ".bz2"],
-        "color": "#FB923C",
-        "folder": "📦 Archives"
-    },
-}
+from config import WIDGET_SCALING, WINDOW_SCALING, SORT_MODES, DEFAULT_CATEGORIES
+from drag_drop import DragDropHelper
+from categories import CategoryManager
+from sorter import FileSorter
+from ui import UIBuilder
 
 
-def get_category(ext):
-    ext = ext.lower()
-    for cat_name, cat_data in CATEGORIES.items():
-        if ext in cat_data["extensions"]:
-            return cat_name
-    return "📂  Other"
+class FileSorterApp:
+    """Главное приложение File Sorter Pro"""
+    
+    def __init__(self, root):
+        """
+        Инициализация приложения
+        
+        Args:
+            root: главное окно Tkinter (CTk)
+        """
+        self.root = root
+        self.root.title("File Sorter Pro")
+        self.root.geometry("900x720")
+        
+        # Инициализация компонентов
+        self.category_manager = CategoryManager()
+        self.ui_builder = UIBuilder(self)
+        self.file_sorter = FileSorter(
+            self.category_manager,
+            self._update_progress,
+            self._log
+        )
+        
+        # Переменные состояния
+        self.selected_folder = ctk.StringVar(value="")
+        self.sort_mode = ctk.StringVar(value=SORT_MODES[0])
+        self.current_theme = ctk.StringVar(value="Dark")
+        
+        self.auto_sort_active = False
+        self.auto_sort_timer = None
+        
+        # Построение интерфейса
+        self.ui_builder.build_ui()
+        self.ui_builder.apply_theme("Dark")
+        self.ui_builder.refresh_categories()
+        
+        # Инициализация Drag & Drop
+        self._setup_drag_drop()
 
-
-def pick_folder():
-    folder = filedialog.askdirectory(title="Select folder to sort")
-    if not folder:
-        return
-    selected_folder.set(folder)
-
-    short = folder if len(folder) <= 35 else "..." + folder[-32:]
-    folder_label.configure(text=short, text_color="#E2E8F0")
-
-    files = [f for f in Path(folder).iterdir() if f.is_file()]
-    count = len(files)
-
-    cat_count = {}
-    for f in files:
-        cat = get_category(f.suffix)
-        cat_count[cat] = cat_count.get(cat, 0) + 1
-
-    if count == 0:
-        stats_label.configure(text="No files in folder", text_color="#EF4444")
-        sort_btn.configure(state="disabled")
-        return
-
-    top = sorted(cat_count.items(), key=lambda x: x[1], reverse=True)[:3]
-    summary = f"Found files: {count}   |   " + "   ".join([f"{c}: {n}" for c, n in top])
-    stats_label.configure(text=summary, text_color="#38BDF8")
-    sort_btn.configure(state="normal")
-
-    log(f"📂 Folder selected: {folder}", "#38BDF8")
-    log(f"📊 Found {count} files", "#94A3B8")
-
-
-def log(text, color="#94A3B8"):
-    def _insert():
-        log_box.configure(state="normal")
-        log_box.insert("end", text + "\n")
-        log_box.configure(state="disabled")
-        log_box.see("end")
-    root.after(0, _insert)
-
-
-def clear_log():
-    log_box.configure(state="normal")
-    log_box.delete("1.0", "end")
-    log_box.configure(state="disabled")
-
-
-def start_sort():
-    sort_btn.configure(state="disabled", text="⏳  Sorting...")
-    progress.set(0)
-    thread = threading.Thread(target=do_sort, daemon=True)
-    thread.start()
-
-
-def do_sort():
-    folder = Path(selected_folder.get())
-    files = [f for f in folder.iterdir() if f.is_file()]
-
-    if not files:
-        log("❌ No files found!", "#EF4444")
-        root.after(0, lambda: sort_btn.configure(state="normal", text="🚀  SORT FILES"))
-        return
-
-    moved = 0
-    errors = 0
-    total = len(files)
-
-    log(f"\n{'─'*40}", "#1E293B")
-    log(f"🚀 Starting sorting {total} files...", "#FBBF24")
-
-    for i, file_path in enumerate(files):
+    def _setup_drag_drop(self):
+        """Настроить функциональность Drag & Drop"""
         try:
-            cat_name = get_category(file_path.suffix)
+            self.dnd = DragDropHelper(self.root, self.on_folder_dropped)
+            self.drop_hint.configure(text="Or drag & drop folder here")
+        except Exception:
+            self.drop_hint.configure(text="Drag & Drop unavailable")
 
-            if cat_name in CATEGORIES:
-                cat_folder_name = CATEGORIES[cat_name]["folder"]
-                cat_color = CATEGORIES[cat_name]["color"]
+    # ───────────────────────────────────────────────────
+    # УПРАВЛЕНИЕ ПАПКАМИ И ИНФОРМАЦИЕЙ
+    # ───────────────────────────────────────────────────
+
+    def pick_folder(self):
+        """Открыть диалог выбора папки"""
+        folder = filedialog.askdirectory(title="Select folder to sort")
+        if not folder:
+            return
+        self.selected_folder.set(folder)
+        self.update_folder_info()
+
+    def on_folder_dropped(self, path):
+        """Обработать проброс папки через Drag & Drop"""
+        self.selected_folder.set(path)
+        self.update_folder_info()
+
+    def update_folder_info(self):
+        """Обновить информацию о выбранной папке"""
+        folder = self.selected_folder.get()
+        short = folder if len(folder) <= 35 else "..." + folder[-32:]
+        self.folder_label.configure(text=short, text_color="#E2E8F0")
+
+        files = [f for f in Path(folder).iterdir() if f.is_file()]
+        count = len(files)
+
+        cat_count = {}
+        for f in files:
+            cat = self.category_manager.get_category(f.suffix)
+            cat_count[cat] = cat_count.get(cat, 0) + 1
+
+        if count == 0:
+            self.stats_label.configure(text="No files in folder", text_color="#EF4444")
+            self.sort_btn.configure(state="disabled")
+            return
+
+        top = sorted(cat_count.items(), key=lambda x: x[1], reverse=True)[:3]
+        summary = f"Found files: {count}   |   " + "   ".join([f"{c}: {n}" for c, n in top])
+        self.stats_label.configure(text=summary, text_color="#38BDF8")
+        self.sort_btn.configure(state="normal")
+
+        self._log(f"Folder selected: {folder}", "#38BDF8")
+        self._log(f"Found {count} files", "#94A3B8")
+
+    # ───────────────────────────────────────────────────
+    # УПРАВЛЕНИЕ КАТЕГОРИЯМИ
+    # ───────────────────────────────────────────────────
+
+    def add_category_dialog(self):
+        """Показать диалог добавления новой категории"""
+        self.ui_builder.show_add_category_dialog()
+
+    def remove_category(self, name):
+        """Удалить категорию"""
+        self.category_manager.remove_category(name)
+        self.ui_builder.refresh_categories()
+
+    # ───────────────────────────────────────────────────
+    # УПРАВЛЕНИЕ ТЕМАМИ
+    # ───────────────────────────────────────────────────
+
+    def apply_theme(self, theme_name):
+        """Применить тему оформления"""
+        self.ui_builder.apply_theme(theme_name)
+
+    # ───────────────────────────────────────────────────
+    # ЛОГИРОВАНИЕ
+    # ───────────────────────────────────────────────────
+
+    def _log(self, text, color="#94A3B8"):
+        """Добавить запись в лог"""
+        UIBuilder.log(self, text, color)
+
+    def clear_log(self):
+        """Очистить лог"""
+        UIBuilder.clear_log(self)
+
+    def export_log(self):
+        """Экспортировать лог в файл"""
+        UIBuilder.export_log(self)
+
+    # ───────────────────────────────────────────────────
+    # СОРТИРОВКА ФАЙЛОВ
+    # ───────────────────────────────────────────────────
+
+    def start_sort(self):
+        """Начать сортировку в отдельном потоке"""
+        self.sort_btn.configure(state="disabled", text=" Sorting...")
+        self.progress.set(0)
+        thread = threading.Thread(target=self.do_sort, daemon=True)
+        thread.start()
+
+    def do_sort(self):
+        """Выполнить сортировку (работает в отдельном потоке)"""
+        folder = self.selected_folder.get()
+        mode = self.sort_mode.get()
+
+        try:
+            if mode == "By Extension":
+                moved, errors = self.file_sorter.sort_by_extension(folder)
+            elif mode == "By Date":
+                moved, errors = self.file_sorter.sort_by_date(folder)
+            elif mode == "By Size":
+                moved, errors = self.file_sorter.sort_by_size(folder)
             else:
-                cat_folder_name = "📂 Other"
-                cat_color = "#94A3B8"
+                moved, errors = 0, 1
+                self._log("Unknown sort mode!", "#EF4444")
 
-            dest_dir = folder / cat_folder_name
-            dest_dir.mkdir(exist_ok=True)
-
-            dest_file = dest_dir / file_path.name
-            if dest_file.exists():
-                stem = file_path.stem
-                suffix = file_path.suffix
-                counter = 1
-                while dest_file.exists():
-                    dest_file = dest_dir / f"{stem}_{counter}{suffix}"
-                    counter += 1
-
-            shutil.move(str(file_path), str(dest_file))
-            moved += 1
-            log(f"  ✓  {file_path.name}  →  {cat_folder_name}", cat_color)
+            # Обновляем UI в главном потоке
+            self.root.after(0, lambda: self._update_sort_complete(moved, errors))
 
         except Exception as e:
-            errors += 1
-            log(f"  ✗  {file_path.name}: {e}", "#EF4444")
+            self._log(f"Sorting error: {e}", "#EF4444")
+            self.root.after(0, self._reset_sort_button)
 
-        progress_val = (i + 1) / total
-        root.after(0, lambda v=progress_val: progress.set(v))
-        time.sleep(0.05)
+    def _update_progress(self, value):
+        """Обновить прогресс (вызывается из потока сортировки)"""
+        self.root.after(0, lambda: self.progress.set(value))
 
-    log(f"\n{'─'*40}", "#1E293B")
-    log(f"✅ Done! Moved: {moved}  |  Errors: {errors}", "#34D399")
+    def _update_sort_complete(self, moved, errors):
+        """Обновить UI после завершения сортировки"""
+        self.sort_btn.configure(state="normal", text="SORT FILES", fg_color="#0369A1", hover_color="#0284C7")
+        self.stats_label.configure(
+            text=f"Sorting complete! Moved {moved} files",
+            text_color="#34D399"
+        )
 
-    root.after(0, lambda: sort_btn.configure(
-        state="normal",
-        text="🚀  SORT FILES",
-        fg_color="#059669",
-        hover_color="#10B981"
-    ))
-    root.after(0, lambda: stats_label.configure(
-        text=f"✅ Sorting complete! Moved {moved} files",
-        text_color="#34D399"
-    ))
+    def _reset_sort_button(self):
+        """Сбросить кнопку сортировки в исходное состояние"""
+        self.sort_btn.configure(state="normal", text="SORT FILES", fg_color="#0369A1", hover_color="#0284C7")
+
+    # ───────────────────────────────────────────────────
+    # АВТОСОРТИРОВКА
+    # ───────────────────────────────────────────────────
+
+    def toggle_auto_sort(self):
+        """Включить/отключить автосортировку"""
+        if self.auto_sort_active:
+            self.auto_sort_active = False
+            if self.auto_sort_timer:
+                self.auto_sort_timer.cancel()
+            self.auto_btn.configure(text="Start Auto-Sort", fg_color="#0369A1", hover_color="#0284C7")
+            self._log("Auto-sort stopped", "#EF4444")
+        else:
+            try:
+                minutes = float(self.auto_entry.get())
+                if minutes <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showwarning("Auto-Sort", "Enter a valid interval in minutes!")
+                return
+            
+            if not self.selected_folder.get():
+                messagebox.showwarning("Auto-Sort", "Select a folder first!")
+                return
+
+            self.auto_sort_active = True
+            self.auto_btn.configure(text="Stop Auto-Sort", fg_color="#EF4444", hover_color="#DC2626")
+            self._log(f"Auto-sort started: every {minutes} min", "#34D399")
+            self.schedule_auto_sort(minutes)
+
+    def schedule_auto_sort(self, minutes):
+        """Запланировать следующую автосортировку"""
+        if not self.auto_sort_active:
+            return
+        self.start_sort()
+        self.auto_sort_timer = threading.Timer(
+            minutes * 60,
+            lambda: self.schedule_auto_sort(minutes)
+        )
+        self.auto_sort_timer.daemon = True
+        self.auto_sort_timer.start()
 
 
-root = ctk.CTk()
-root.title("📁 File Sorter by Aziz Sadonov")
-root.geometry("820x620")
-root.configure(fg_color="#0A0F1A")
+# ═══════════════════════════════════════════════════════════════
+# ЗАПУСК ПРИЛОЖЕНИЯ
+# ═══════════════════════════════════════════════════════════════
 
-selected_folder = ctk.StringVar(value="")
-
-header = ctk.CTkFrame(root, fg_color="#0F172A", corner_radius=0, height=80)
-header.pack(fill="x")
-header.pack_propagate(False)
-
-ctk.CTkLabel(
-    header,
-    text="📁  FILE SORTER",
-    font=ctk.CTkFont(family="Courier New", size=24, weight="bold"),
-    text_color="#38BDF8"
-).place(relx=0.5, rely=0.45, anchor="center")
-
-ctk.CTkLabel(
-    header,
-    text="Automatically sorts files into folders",
-    font=ctk.CTkFont(size=12),
-    text_color="#475569"
-).place(relx=0.5, rely=0.78, anchor="center")
-
-content = ctk.CTkFrame(root, fg_color="transparent")
-content.pack(fill="both", expand=True, padx=20, pady=15)
-
-left = ctk.CTkFrame(content, fg_color="transparent", width=260)
-left.pack(side="left", fill="y", padx=(0, 15))
-left.pack_propagate(False)
-
-folder_frame = ctk.CTkFrame(left, fg_color="#0F172A", corner_radius=12)
-folder_frame.pack(fill="x", pady=(0, 12))
-
-ctk.CTkLabel(
-    folder_frame,
-    text="FOLDER TO SORT",
-    font=ctk.CTkFont(size=10, weight="bold"),
-    text_color="#475569"
-).pack(pady=(12, 6), padx=15, anchor="w")
-
-folder_label = ctk.CTkLabel(
-    folder_frame,
-    text="Not selected",
-    font=ctk.CTkFont(size=11),
-    text_color="#64748B",
-    wraplength=220,
-    justify="left"
-)
-folder_label.pack(padx=15, anchor="w")
-
-ctk.CTkButton(
-    folder_frame,
-    text="📂  Select folder",
-    font=ctk.CTkFont(size=13, weight="bold"),
-    fg_color="#1E293B",
-    hover_color="#334155",
-    text_color="#38BDF8",
-    corner_radius=8,
-    height=38,
-    command=pick_folder
-).pack(fill="x", padx=15, pady=12)
-
-cats_frame = ctk.CTkFrame(left, fg_color="#0F172A", corner_radius=12)
-cats_frame.pack(fill="both", expand=True)
-
-ctk.CTkLabel(
-    cats_frame,
-    text="CATEGORIES",
-    font=ctk.CTkFont(size=10, weight="bold"),
-    text_color="#475569"
-).pack(pady=(12, 8), padx=15, anchor="w")
-
-for cat_name, cat_data in CATEGORIES.items():
-    row = ctk.CTkFrame(cats_frame, fg_color="transparent")
-    row.pack(fill="x", padx=12, pady=2)
-
-    ctk.CTkLabel(
-        row, text="●",
-        font=ctk.CTkFont(size=14),
-        text_color=cat_data["color"],
-        width=20
-    ).pack(side="left")
-
-    ctk.CTkLabel(
-        row,
-        text=cat_name,
-        font=ctk.CTkFont(size=12),
-        text_color="#94A3B8"
-    ).pack(side="left", padx=(4, 0))
-
-right = ctk.CTkFrame(content, fg_color="transparent")
-right.pack(side="left", fill="both", expand=True)
-
-stats_frame = ctk.CTkFrame(right, fg_color="#0F172A", corner_radius=12, height=90)
-stats_frame.pack(fill="x", pady=(0, 12))
-stats_frame.pack_propagate(False)
-
-stats_label = ctk.CTkLabel(
-    stats_frame,
-    text="Select a folder to see files",
-    font=ctk.CTkFont(size=13),
-    text_color="#475569"
-)
-stats_label.place(relx=0.5, rely=0.5, anchor="center")
-
-log_header = ctk.CTkFrame(right, fg_color="transparent")
-log_header.pack(fill="x")
-
-ctk.CTkLabel(
-    log_header,
-    text="OPERATION LOG",
-    font=ctk.CTkFont(size=10, weight="bold"),
-    text_color="#475569"
-).pack(side="left")
-
-ctk.CTkButton(
-    log_header,
-    text="Clear",
-    font=ctk.CTkFont(size=10),
-    fg_color="transparent",
-    hover_color="#1E293B",
-    text_color="#475569",
-    width=60, height=20,
-    command=clear_log
-).pack(side="right")
-
-log_box = ctk.CTkTextbox(
-    right,
-    fg_color="#0F172A",
-    text_color="#94A3B8",
-    font=ctk.CTkFont(family="Courier New", size=11),
-    corner_radius=12,
-    border_color="#1E293B",
-    border_width=1,
-    wrap="word"
-)
-log_box.pack(fill="both", expand=True, pady=(6, 12))
-log_box.configure(state="disabled")
-
-progress = ctk.CTkProgressBar(
-    right,
-    fg_color="#1E293B",
-    progress_color="#38BDF8",
-    corner_radius=4,
-    height=6
-)
-progress.pack(fill="x", pady=(0, 10))
-progress.set(0)
-
-sort_btn = ctk.CTkButton(
-    right,
-    text="🚀  SORT FILES",
-    font=ctk.CTkFont(size=15, weight="bold"),
-    fg_color="#0369A1",
-    hover_color="#0284C7",
-    text_color="white",
-    corner_radius=12,
-    height=50,
-    state="disabled",
-    command=start_sort
-)
-sort_btn.pack(fill="x")
-
-root.mainloop()
+if __name__ == "__main__":
+    # Инициализация customtkinter
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+    ctk.set_widget_scaling(WIDGET_SCALING)
+    ctk.set_window_scaling(WINDOW_SCALING)
+    
+    # Создание и запуск главного окна
+    root = ctk.CTk()
+    app = FileSorterApp(root)
+    root.mainloop()
