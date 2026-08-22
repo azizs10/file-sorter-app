@@ -18,3 +18,5 @@ git clone [https://github.com/azizs10/file-sorter-app.git](https://github.com/az
 cd file-sorter-app
 pip install customtkinter
 python main.py
+```
+Please give it a star; that would really help me out.
